@@ -17,6 +17,9 @@ package io.confluent.connect.jdbc.source;
 
 import com.mockrunner.mock.jdbc.MockResultSet;
 import com.mockrunner.mock.jdbc.MockResultSetMetaData;
+import io.confluent.connect.jdbc.dialect.DatabaseDialect;
+import io.confluent.connect.jdbc.source.SchemaMapping.FieldSetter;
+import io.confluent.connect.jdbc.util.ExpressionBuilder;
 import oracle.jdbc.internal.OracleCallableStatement;
 import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.errors.ConnectException;
@@ -33,61 +36,82 @@ import java.sql.SQLException;
 import java.util.Collections;
 import java.util.Map;
 
-import io.confluent.connect.jdbc.dialect.DatabaseDialect;
-import io.confluent.connect.jdbc.source.SchemaMapping.FieldSetter;
-import io.confluent.connect.jdbc.util.ExpressionBuilder;
+import static io.confluent.connect.jdbc.source.TableQuerier.QueryMode.STORED_PROCEDURE;
 
 /**
  * BulkTableQuerier always returns the entire table.
  */
 public class BulkTableQuerier extends TableQuerier {
   private static final Logger log = LoggerFactory.getLogger(BulkTableQuerier.class);
+
   private static final String RECORDSET_NAME = "Usage Data Record";
   private static final String STORED_PROCEDURE_OUT_PARAMETER = "udr";
 
   public BulkTableQuerier(
-      DatabaseDialect dialect,
-      QueryMode mode,
-      String name,
-      String topicPrefix,
-      String suffix
+          DatabaseDialect dialect,
+          QueryMode mode,
+          String name,
+          String topicPrefix,
+          String suffix
   ) {
     super(dialect, mode, name, topicPrefix, suffix);
   }
 
   @Override
   protected void createPreparedStatement(Connection db) throws SQLException {
-    log.trace("storedProcedure is: {}", storedProcedure);
     ExpressionBuilder builder = dialect.expressionBuilder();
-    builder = builder
-            .append("{CALL ")
-            .append(storedProcedure)
-            .append("(?, ?)}");
+    switch (mode) {
+      case TABLE:
+        builder.append("SELECT * FROM ").append(tableId);
+
+        break;
+      case QUERY:
+        builder.append(query);
+
+        break;
+      case STORED_PROCEDURE:
+        log.trace("storedProcedure is: {}", storedProcedure);
+        builder.append("{CALL ")
+                .append(storedProcedure)
+                .append("(?, ?)}");
+        break;
+      default:
+        throw new ConnectException("Unknown mode: " + mode);
+    }
+
+    addSuffixIfPresent(builder);
 
     String queryStr = builder.toString();
 
-    log.trace("{} prepared SQL query: {}", this, queryStr);
     recordQuery(queryStr);
-    stmt = dialect.createPreparedCall(db, queryStr);
+    log.trace("{} prepared SQL query: {}", this, queryStr);
+    if (mode == STORED_PROCEDURE) {
+      stmt = dialect.createPreparedCall(db, queryStr);
+    } else {
+      stmt = dialect.createPreparedStatement(db, queryStr);
+    }
   }
 
   @Override
   protected ResultSet executeQuery() throws SQLException {
-    stmt.execute();
-    Clob clob = ((OracleCallableStatement)stmt).getClob(2);
-    String value = clob.getSubString(1, (int) clob.length());
-    log.trace(value);
+    if (mode == STORED_PROCEDURE) {
+      stmt.execute();
+      Clob clob = ((OracleCallableStatement) stmt).getClob(2);
+      String value = clob.getSubString(1, (int) clob.length());
+      log.trace(value);
 
-    MockResultSet mockResultSet = new MockResultSet(RECORDSET_NAME);
-    mockResultSet.addRow(Collections.singletonList(value));
+      MockResultSet mockResultSet = new MockResultSet(RECORDSET_NAME);
+      mockResultSet.addRow(Collections.singletonList(value));
 
-    MockResultSetMetaData mockResultSetMetaData = new MockResultSetMetaData();
-    mockResultSetMetaData.setColumnCount(1);
-    mockResultSetMetaData.setColumnName(1, STORED_PROCEDURE_OUT_PARAMETER);
-    mockResultSetMetaData.setColumnType(1, 12); //Varchar
-    mockResultSet.setResultSetMetaData(mockResultSetMetaData);
+      MockResultSetMetaData mockResultSetMetaData = new MockResultSetMetaData();
+      mockResultSetMetaData.setColumnCount(1);
+      mockResultSetMetaData.setColumnName(1, STORED_PROCEDURE_OUT_PARAMETER);
+      mockResultSetMetaData.setColumnType(1, 12); //Varchar
+      mockResultSet.setResultSetMetaData(mockResultSetMetaData);
 
-    return mockResultSet;
+      return mockResultSet;
+    }
+    return stmt.executeQuery();
   }
 
   @Override
@@ -104,20 +128,36 @@ public class BulkTableQuerier extends TableQuerier {
         throw new DataException(e);
       }
     }
-
+    // TODO: key from primary key? partition?
     final String topic;
     final Map<String, String> partition;
-    partition = Collections.singletonMap(
-            JdbcSourceConnectorConstants.STORED_PROCEDURE,
-            storedProcedure);
-    topic = topicPrefix;
-
+    switch (mode) {
+      case TABLE:
+        String name = tableId.tableName(); // backwards compatible
+        partition = Collections.singletonMap(JdbcSourceConnectorConstants.TABLE_NAME_KEY, name);
+        topic = topicPrefix + name;
+        break;
+      case QUERY:
+        partition = Collections.singletonMap(JdbcSourceConnectorConstants.QUERY_NAME_KEY,
+                JdbcSourceConnectorConstants.QUERY_NAME_VALUE
+        );
+        topic = topicPrefix;
+        break;
+      case STORED_PROCEDURE:
+        partition = Collections.singletonMap(
+                JdbcSourceConnectorConstants.STORED_PROCEDURE, storedProcedure);
+        topic = topicPrefix;
+        break;
+      default:
+        throw new ConnectException("Unexpected query mode: " + mode);
+    }
     return new SourceRecord(partition, null, topic, record.schema(), record);
   }
 
   @Override
   public String toString() {
-    return "StoredProcedureQuerier{" + "storedProcedure='" + storedProcedure
+    return "BulkTableQuerier{" + "table='" + tableId + '\'' + ", query='" + query + '\''
+            + ", storedProcedure='" + storedProcedure + '\''
             + ", topicPrefix='" + topicPrefix + '\'' + '}';
   }
 
