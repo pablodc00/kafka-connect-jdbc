@@ -36,10 +36,10 @@ public class JdbcSourceTaskConfig extends JdbcSourceConnectorConfig {
   private static final String STORED_PROCEDURE_DEFAULT = "";
 
   static ConfigDef config = baseConfigDef()
-      .define(TABLES_CONFIG, Type.LIST, Importance.HIGH, TABLES_DOC)
-      .define(STORED_PROCEDURE_CONFIG, Type.STRING, STORED_PROCEDURE_DEFAULT,
-              Importance.HIGH, STORED_PROCEDURE_DOC)
-      .defineInternal(TABLES_FETCHED, Type.BOOLEAN, false, Importance.HIGH);
+          .define(TABLES_CONFIG, Type.LIST, Importance.HIGH, TABLES_DOC)
+          .define(STORED_PROCEDURE_CONFIG, Type.STRING, STORED_PROCEDURE_DEFAULT,
+                  Importance.HIGH, STORED_PROCEDURE_DOC)
+          .defineInternal(TABLES_FETCHED, Type.BOOLEAN, false, Importance.HIGH);
 
   public JdbcSourceTaskConfig(Map<String, String> props) {
     super(config, props);

@@ -15,6 +15,9 @@
 
 package io.confluent.connect.jdbc.source;
 
+import io.confluent.connect.jdbc.dialect.DatabaseDialect;
+import io.confluent.connect.jdbc.util.ExpressionBuilder;
+import io.confluent.connect.jdbc.util.TableId;
 import org.apache.kafka.connect.source.SourceRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -24,10 +27,6 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 
-import io.confluent.connect.jdbc.dialect.DatabaseDialect;
-import io.confluent.connect.jdbc.util.ExpressionBuilder;
-import io.confluent.connect.jdbc.util.TableId;
-
 /**
  * TableQuerier executes queries against a specific table. Implementations handle different types
  * of queries: periodic bulk loading, incremental loads using auto incrementing IDs, incremental
@@ -36,7 +35,7 @@ import io.confluent.connect.jdbc.util.TableId;
 abstract class TableQuerier implements Comparable<TableQuerier> {
   public enum QueryMode {
     TABLE, // Copying whole tables, with queries constructed automatically
-    QUERY,  // User-specified query
+    QUERY, // User-specified query
     STORED_PROCEDURE // Stored Procedure
   }
 
@@ -62,11 +61,11 @@ abstract class TableQuerier implements Comparable<TableQuerier> {
   private int attemptedRetries;
 
   public TableQuerier(
-      DatabaseDialect dialect,
-      QueryMode mode,
-      String nameOrQuery,
-      String topicPrefix,
-      String suffix
+          DatabaseDialect dialect,
+          QueryMode mode,
+          String nameOrQuery,
+          String topicPrefix,
+          String suffix
   ) {
     this.dialect = dialect;
     this.mode = mode;
@@ -176,9 +175,9 @@ abstract class TableQuerier implements Comparable<TableQuerier> {
   protected void addSuffixIfPresent(ExpressionBuilder builder) {
     if (!this.suffix.isEmpty()) {
       builder.append(" ").append(suffix);
-    }  
+    }
   }
-  
+
   protected void recordQuery(String query) {
     if (query != null && !query.equals(loggedQueryString)) {
       // For usability, log the statement at INFO level only when it changes
